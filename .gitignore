@@ -1,0 +1,13 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local/generated artifacts
+outputs/
+work/
+stack-audit-report.md
+
+# Do not commit real local env files at the repo root.
+/.env
+/.env.*

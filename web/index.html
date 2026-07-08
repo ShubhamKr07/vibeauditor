@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Stack Auditor Web</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="workspace" aria-label="Stack Auditor workspace">
+        <aside class="controls" aria-label="Audit controls">
+          <div class="brand">
+            <div class="mark" aria-hidden="true">SA</div>
+            <div>
+              <h1>Stack Auditor</h1>
+              <p>Interactive repo scan for stack, scale, and cost posture.</p>
+            </div>
+          </div>
+
+          <form id="audit-form" class="form">
+            <label>
+              GitHub repository URL
+              <input id="repo-url" name="repoUrl" type="url" placeholder="https://github.com/owner/repo" required />
+            </label>
+
+            <div class="grid-two">
+              <label>
+                Branch or tag
+                <input id="branch" name="branch" placeholder="default branch" />
+              </label>
+              <label>
+                Budget / month
+                <input id="budget" name="budget" type="number" min="0" step="1" placeholder="250" />
+              </label>
+            </div>
+
+            <div class="grid-two">
+              <label>
+                Target scale
+                <select id="target-scale" name="targetScale">
+                  <option value="">Auto</option>
+                  <option value="0-to-1">0 -> 1</option>
+                  <option value="1-to-100">1 -> 100</option>
+                  <option value="100-to-10k">100 -> 10K</option>
+                  <option value="10k-to-1m">10K -> 1M</option>
+                  <option value="1m-to-100m">1M -> 100M</option>
+                </select>
+              </label>
+              <label>
+                Current host
+                <input id="current-host" name="currentHost" placeholder="Vercel, AWS..." />
+              </label>
+            </div>
+
+            <label>
+              GitHub token
+              <input id="github-token" name="githubToken" type="password" autocomplete="off" placeholder="Optional, kept in this tab only" />
+            </label>
+
+            <button id="scan-button" class="primary" type="submit">
+              <span class="button-icon" aria-hidden="true">></span>
+              Analyze repository
+            </button>
+          </form>
+
+          <div class="status" id="status" role="status">
+            Ready. Public repos work without a token until GitHub rate limits apply.
+          </div>
+
+          <div class="actions">
+            <button id="load-demo" type="button">Load demo audit</button>
+            <button id="copy-report" type="button" disabled>Copy report</button>
+            <button id="download-report" type="button" disabled>Download Markdown</button>
+            <button id="copy-tasks" type="button" disabled>Copy tasks</button>
+          </div>
+        </aside>
+
+        <section class="results" aria-label="Audit results">
+          <nav class="tabs" aria-label="Result views">
+            <button class="tab active" type="button" data-tab="overview">Overview</button>
+            <button class="tab" type="button" data-tab="inventory">Inventory</button>
+            <button class="tab" type="button" data-tab="report">Report</button>
+            <button class="tab" type="button" data-tab="tasks">Tasks</button>
+          </nav>
+
+          <section id="overview" class="panel active" aria-labelledby="overview-tab">
+            <div class="empty-state" id="empty-state">
+              <h2>Paste a GitHub repo URL to start.</h2>
+              <p>The tool scans manifests, dependency names, route files, infra config, env samples, tests, and lockfiles. Scores are conservative when evidence is missing.</p>
+            </div>
+            <div id="overview-content" class="hidden">
+              <div class="summary-band">
+                <div>
+                  <span class="eyebrow">Detected app</span>
+                  <strong id="detected-app">-</strong>
+                </div>
+                <div>
+                  <span class="eyebrow">Ready for</span>
+                  <strong id="ready-tier">-</strong>
+                </div>
+                <div>
+                  <span class="eyebrow">First bottleneck</span>
+                  <strong id="first-bottleneck">-</strong>
+                </div>
+              </div>
+
+              <div class="score-grid" id="score-grid"></div>
+
+              <div class="section-row">
+                <h2>Scalability and cost tiers</h2>
+                <span class="note">Estimated, dated, and source-linked.</span>
+              </div>
+              <div class="table-wrap">
+                <table id="scale-table"></table>
+              </div>
+            </div>
+          </section>
+
+          <section id="inventory" class="panel">
+            <div class="section-row">
+              <h2>Inventory JSON</h2>
+              <span class="note">Evidence captured from GitHub file tree and selected manifests.</span>
+            </div>
+            <pre id="inventory-json" class="code-output">{}</pre>
+          </section>
+
+          <section id="report" class="panel">
+            <div class="section-row">
+              <h2>Markdown report</h2>
+              <span class="note">Same content used by copy/download.</span>
+            </div>
+            <pre id="report-markdown" class="code-output"></pre>
+          </section>
+
+          <section id="tasks" class="panel">
+            <div class="section-row">
+              <h2>Paste-ready remediation tasks</h2>
+              <span class="note">Ordered by urgency for a coding agent.</span>
+            </div>
+            <div id="task-list" class="task-list"></div>
+          </section>
+        </section>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

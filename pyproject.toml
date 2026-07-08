@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stack-auditor"
+version = "0.1.0"
+description = "CLI auditor for web/mobile app tech stacks, scalability, and infrastructure cost posture."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Stack Auditor contributors" }]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+stack-auditor = "stack_auditor.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["stack_auditor*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
