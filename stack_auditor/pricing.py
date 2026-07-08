@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
+
+from . import brightdata
 
 DEFAULT_CACHE_DIR = Path.home() / ".cache" / "stack-auditor"
 
@@ -78,6 +81,27 @@ def today_stamp() -> str:
 def source_list() -> list[dict[str, str]]:
     stamp = today_stamp()
     return [{**source, "accessed": stamp} for source in PRICING_SOURCES + BEST_PRACTICE_SOURCES]
+
+
+def verify_pricing_source(name: str, url: str) -> dict[str, Any] | None:
+    """Best-effort freshness check: does a live search for "<name> pricing" still point at
+    the cited URL's domain? Returns None if Bright Data isn't configured or the check fails.
+    This never changes what's cited — it only flags drift for a human to review, per the
+    project's rule against silently mutating cited sources.
+    """
+    if not brightdata.is_configured():
+        return None
+    result = brightdata.search_serp(f"{name} pricing")
+    if not result:
+        return None
+    top_domain = brightdata.top_result_domain(result)
+    cited_domain = urllib.parse.urlparse(url).netloc.removeprefix("www.")
+    return {
+        "checked": True,
+        "cited_domain": cited_domain,
+        "top_result_domain": top_domain,
+        "matches": bool(top_domain) and top_domain == cited_domain,
+    }
 
 
 def tier_estimates(provider_hint: str | None = None) -> list[dict[str, Any]]:

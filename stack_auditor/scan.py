@@ -144,11 +144,32 @@ THIRD_PARTY_DEPENDENCIES = {
     "stripe": "Stripe",
     "@stripe/stripe-js": "Stripe",
     "openai": "OpenAI",
+    "@anthropic-ai/sdk": "Anthropic",
+    "anthropic": "Anthropic",
     "@sentry/nextjs": "Sentry",
     "sentry-sdk": "Sentry",
     "posthog-js": "PostHog",
     "resend": "Resend",
     "twilio": "Twilio",
+    "algoliasearch": "Algolia",
+    "elasticsearch": "Elasticsearch",
+    "@sendgrid/mail": "SendGrid",
+    "launchdarkly-node-server-sdk": "LaunchDarkly",
+}
+
+CORS_DEPENDENCIES = {
+    "cors": "cors (npm)",
+    "django-cors-headers": "django-cors-headers",
+    "flask-cors": "Flask-CORS",
+    "fastapi-cors": "FastAPI CORS",
+}
+
+RATE_LIMIT_DEPENDENCIES = {
+    "express-rate-limit": "express-rate-limit",
+    "django-ratelimit": "django-ratelimit",
+    "slowapi": "slowapi",
+    "flask-limiter": "Flask-Limiter",
+    "rack-attack": "rack-attack",
 }
 
 INFRA_PATTERNS = {
@@ -164,6 +185,85 @@ INFRA_PATTERNS = {
     "serverless.yml": "Serverless Framework",
     "serverless.yaml": "Serverless Framework",
     ".github/workflows": "GitHub Actions",
+}
+
+README_NAMES = {"readme.md", "readme.rst", "readme.txt", "readme"}
+
+NOISE_FEATURE_NAMES = {
+    "api",
+    "components",
+    "component",
+    "lib",
+    "libs",
+    "utils",
+    "util",
+    "common",
+    "shared",
+    "types",
+    "hooks",
+    "styles",
+    "assets",
+    "public",
+    "static",
+    "__tests__",
+    "test",
+    "tests",
+    "ui",
+    "misc",
+    "index",
+    "constants",
+    "config",
+    "middleware",
+    "migrations",
+    "static_files",
+    "templates",
+    "settings",
+    "urls",
+    "wsgi",
+    "asgi",
+    "manage",
+    "admin",
+    "apps",
+    "serializers",
+    "views",
+    "models",
+}
+
+FRONTEND_FRAMEWORKS = {"Next.js", "React", "Vue", "Nuxt", "Svelte", "Angular"}
+
+FEATURE_ROOTS = [
+    ("app/api/", "api"),
+    ("pages/api/", "api"),
+    ("app/", "frontend"),
+    ("pages/", "frontend"),
+    ("src/", "generic"),
+    ("components/", "frontend"),
+    ("server/", "backend"),
+    ("backend/", "backend"),
+    ("routes/", "api"),
+    ("controllers/", "api"),
+]
+
+# Grep-only, non-invasive patterns for a lightweight committed-secret sanity check.
+# This is not a substitute for a real secret scanner (gitleaks/trufflehog); it only
+# flags a small set of unambiguous high-signal formats to avoid false-positive noise.
+SECRET_PATTERNS = [
+    (re.compile(r"AKIA[0-9A-Z]{16}"), "AWS access key ID pattern"),
+    (re.compile(r"sk_live_[0-9a-zA-Z]{16,}"), "Stripe live secret key pattern"),
+    (re.compile(r"AIza[0-9A-Za-z\-_]{35}"), "Google API key pattern"),
+    (re.compile(r"-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----"), "embedded private key block"),
+    (re.compile(r"xox[baprs]-[0-9A-Za-z-]{10,}"), "Slack token pattern"),
+    (re.compile(r"ghp_[0-9A-Za-z]{36}"), "GitHub personal access token pattern"),
+]
+
+SENSITIVE_PORT_LABELS = {
+    "22": "SSH",
+    "3389": "RDP",
+    "5432": "PostgreSQL",
+    "3306": "MySQL",
+    "6379": "Redis",
+    "27017": "MongoDB",
+    "9200": "Elasticsearch",
 }
 
 
@@ -221,7 +321,13 @@ def _scan_path(root: Path, source: str, branch: str | None) -> dict[str, Any]:
     api = _detect_api(files, frameworks)
     frontend = _detect_frontend(files, frameworks)
     backend = _detect_backend(files, frameworks, api)
-    security = _detect_security(files, env_files, auth)
+    cors = _detect_named(dependencies, CORS_DEPENDENCIES)
+    rate_limit = _detect_named(dependencies, RATE_LIMIT_DEPENDENCIES)
+    exposed_ports = _detect_exposed_ports(root, files)
+    secret_hits = _secret_scan(root, files)
+    security = _detect_security(files, env_files, auth, cors, rate_limit, exposed_ports, secret_hits)
+    business = _read_business_evidence(root, files, manifests)
+    features = _segment_features(files, tests.get("files", []), frameworks)
 
     return {
         "repo": {
@@ -262,6 +368,8 @@ def _scan_path(root: Path, source: str, branch: str | None) -> dict[str, Any]:
             "security": security,
             "dependency_health": _dependency_health(files, manifests),
         },
+        "business": business,
+        "features": features,
     }
 
 
@@ -446,7 +554,15 @@ def _detect_backend(files: list[str], frameworks: list[str], api: dict[str, Any]
     return {"frameworks": [f for f in frameworks if f in {"Express", "FastAPI", "Django", "Flask", "NestJS"}], "paths": sorted(set(paths + api.get("routes", [])))[:100]}
 
 
-def _detect_security(files: list[str], env_files: list[str], auth: list[str]) -> dict[str, Any]:
+def _detect_security(
+    files: list[str],
+    env_files: list[str],
+    auth: list[str],
+    cors: list[str],
+    rate_limit: list[str],
+    exposed_ports: list[dict[str, str]],
+    secret_hits: list[dict[str, str]],
+) -> dict[str, Any]:
     risky_env = [f for f in env_files if Path(f).name in {".env", ".env.local", ".env.production"}]
     secret_like_files = [f for f in files if re.search(r"(secret|credential|service-account|private-key)", f, re.I)]
     return {
@@ -454,7 +570,137 @@ def _detect_security(files: list[str], env_files: list[str], auth: list[str]) ->
         "env_samples_present": any("example" in f.lower() or "sample" in f.lower() for f in env_files),
         "committed_runtime_env_files": risky_env,
         "secret_like_filenames": secret_like_files[:20],
+        "cors_signal": cors,
+        "rate_limit_signal": rate_limit,
+        "exposed_ports": exposed_ports,
+        "secret_scan_hits": secret_hits,
     }
+
+
+def _detect_exposed_ports(root: Path, files: list[str]) -> list[dict[str, str]]:
+    hits: list[dict[str, str]] = []
+    candidates = [
+        rel
+        for rel in files
+        if Path(rel).name == "Dockerfile"
+        or Path(rel).name.endswith(".Dockerfile")
+        or Path(rel).name in {"docker-compose.yml", "docker-compose.yaml"}
+    ]
+    for rel in candidates:
+        raw = _safe_read(root / rel)
+        for match in re.finditer(r"(?im)^\s*EXPOSE\s+(\d{2,5})", raw):
+            port = match.group(1)
+            hits.append({"port": port, "path": rel, "service": SENSITIVE_PORT_LABELS.get(port, "")})
+        for match in re.finditer(r'(?m)^\s*-\s*["\']?(\d{2,5}):(\d{2,5})["\']?', raw):
+            port = match.group(2)
+            hits.append({"port": port, "path": rel, "service": SENSITIVE_PORT_LABELS.get(port, "")})
+    seen: set[tuple[str, str]] = set()
+    deduped: list[dict[str, str]] = []
+    for hit in hits:
+        key = (hit["port"], hit["path"])
+        if key not in seen:
+            seen.add(key)
+            deduped.append(hit)
+    return deduped
+
+
+def _secret_scan(root: Path, files: list[str], max_files: int = 400) -> list[dict[str, str]]:
+    scannable = [rel for rel in files if Path(rel).suffix in TEXT_SUFFIXES or Path(rel).name.startswith(".env")]
+    scannable.sort(key=lambda rel: (0 if re.search(r"(config|env|secret|setting|key)", rel, re.I) else 1, rel))
+    hits: list[dict[str, str]] = []
+    for rel in scannable[:max_files]:
+        raw = _safe_read(root / rel)
+        if not raw:
+            continue
+        for pattern, label in SECRET_PATTERNS:
+            if pattern.search(raw):
+                hits.append({"path": rel, "pattern": label})
+                break
+    return hits[:20]
+
+
+def _read_business_evidence(root: Path, files: list[str], manifests: list[dict[str, Any]]) -> dict[str, Any]:
+    readme_rel = next((f for f in files if Path(f).name.lower() in README_NAMES and "/" not in f), None)
+    readme_excerpt = ""
+    if readme_rel:
+        raw = _safe_read(root / readme_rel)
+        readme_excerpt = raw.strip()[:4000]
+
+    description = ""
+    keywords: list[str] = []
+    for manifest in manifests:
+        name = Path(manifest.get("path", "")).name
+        if name == "package.json":
+            raw = _safe_read(root / manifest["path"])
+            try:
+                data = json.loads(raw)
+                description = description or (data.get("description") or "")
+                keywords.extend(data.get("keywords") or [])
+            except json.JSONDecodeError:
+                pass
+        elif name == "pyproject.toml":
+            raw = _safe_read(root / manifest["path"])
+            desc_match = re.search(r'(?m)^\s*description\s*=\s*"([^"]+)"', raw)
+            if desc_match and not description:
+                description = desc_match.group(1)
+            kw_match = re.search(r"(?ms)^\s*keywords\s*=\s*\[([^\]]*)\]", raw)
+            if kw_match:
+                keywords.extend(re.findall(r'"([^"]+)"', kw_match.group(1)))
+
+    return {
+        "readme_path": readme_rel,
+        "readme_excerpt": readme_excerpt,
+        "package_description": description,
+        "keywords": sorted(set(k.lower() for k in keywords)),
+    }
+
+
+def _strip_all_suffixes(name: str) -> str:
+    stem = name
+    while Path(stem).suffix:
+        stem = Path(stem).stem
+    return stem
+
+
+def _segment_features(files: list[str], test_files: list[str], frameworks: list[str]) -> list[dict[str, Any]]:
+    has_frontend_framework = any(f in FRONTEND_FRAMEWORKS for f in frameworks)
+    roots = [
+        (prefix, layer)
+        for prefix, layer in FEATURE_ROOTS
+        if prefix not in {"app/", "pages/", "components/"} or has_frontend_framework
+    ]
+    groups: dict[str, dict[str, Any]] = {}
+    for rel in files:
+        for prefix, layer in roots:
+            if not rel.startswith(prefix):
+                continue
+            remainder = rel[len(prefix):]
+            parts = remainder.split("/")
+            head = parts[0]
+            name = _strip_all_suffixes(head).lower() if len(parts) == 1 else head.lower()
+            name = re.sub(r"^[\[(].*[\])]$", "", name)  # drop Next.js dynamic segment wrappers like [id]
+            if not name or name in NOISE_FEATURE_NAMES or name.startswith("_") or name.startswith("."):
+                break
+            entry = groups.setdefault(name, {"name": name, "paths": [], "layers": set()})
+            entry["paths"].append(rel)
+            entry["layers"].add(layer)
+            break
+
+    features = []
+    for name, data in groups.items():
+        paths = sorted(set(data["paths"]))
+        has_tests = any(name in Path(t).as_posix().lower() for t in test_files)
+        features.append(
+            {
+                "name": name,
+                "paths": paths[:12],
+                "file_count": len(paths),
+                "layers": sorted(data["layers"]),
+                "has_tests": has_tests,
+            }
+        )
+    features.sort(key=lambda item: item["file_count"], reverse=True)
+    return features[:20]
 
 
 def _dependency_health(files: list[str], manifests: list[dict[str, Any]]) -> dict[str, Any]:

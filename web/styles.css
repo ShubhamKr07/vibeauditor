@@ -681,6 +681,75 @@ th {
   white-space: pre-wrap;
 }
 
+/* ---------- Business / framework prose panels ---------- */
+
+.panel-prose {
+  display: grid;
+  gap: 12px;
+  max-width: 900px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.panel-prose p {
+  color: var(--muted);
+}
+
+.panel-prose p strong {
+  color: var(--ink);
+}
+
+.panel-prose h4 {
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.panel-prose ul {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--muted);
+  display: grid;
+  gap: 6px;
+}
+
+.panel-prose table {
+  min-width: 0;
+  margin-top: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+/* ---------- Feature grid ---------- */
+
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.feature-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px;
+  background: var(--surface-2);
+}
+
+.feature-card h4 {
+  margin: 0;
+  font-size: 14px;
+  font-family: var(--font-mono);
+}
+
+.feature-card p {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 /* ---------- Tasks ---------- */
 
 .task-list {

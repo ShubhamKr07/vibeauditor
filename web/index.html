@@ -70,6 +70,18 @@
               <input id="github-token" name="githubToken" type="password" autocomplete="off" placeholder="Optional, kept in this tab only" />
             </label>
 
+            <div class="grid-two">
+              <label>
+                Bright Data API key
+                <input id="brightdata-key" name="brightDataKey" type="password" autocomplete="off" placeholder="Optional, kept in this tab only" />
+              </label>
+              <label>
+                Bright Data SERP zone
+                <input id="brightdata-zone" name="brightDataZone" autocomplete="off" placeholder="Optional" />
+              </label>
+            </div>
+            <p class="note">Bright Data enables a live competitor-search evidence lookup. Both fields stay in this browser tab only — never stored, never sent anywhere except api.brightdata.com. Browser CORS restrictions may block the request; if so, the report notes it and falls back to static evidence.</p>
+
             <button id="scan-button" class="primary" type="submit">
               <span class="button-icon" aria-hidden="true">&gt;</span>
               Analyze repository
@@ -86,14 +98,20 @@
             <button id="copy-report" type="button" disabled>Copy report</button>
             <button id="download-report" type="button" disabled>Download Markdown</button>
             <button id="copy-tasks" type="button" disabled>Copy tasks</button>
+            <button id="copy-agent-prompt" type="button" disabled>Copy agent prompt</button>
+            <button id="download-agent-prompt" type="button" disabled>Download agent prompt</button>
           </div>
         </aside>
 
         <section class="results" aria-label="Audit results">
           <nav class="tabs" aria-label="Result views">
             <button class="tab active" type="button" data-tab="overview">Overview</button>
+            <button class="tab" type="button" data-tab="business">Business</button>
+            <button class="tab" type="button" data-tab="features">Features</button>
+            <button class="tab" type="button" data-tab="framework">Framework</button>
             <button class="tab" type="button" data-tab="inventory">Inventory</button>
             <button class="tab" type="button" data-tab="report">Report</button>
+            <button class="tab" type="button" data-tab="agent-prompt">Agent prompt</button>
             <button class="tab" type="button" data-tab="tasks">Tasks</button>
           </nav>
 
@@ -131,6 +149,30 @@
             </div>
           </section>
 
+          <section id="business" class="panel">
+            <div class="section-row">
+              <h2>Business context</h2>
+              <span class="note">Inferred from README/description/keywords + dependency signals. Verify with the product owner.</span>
+            </div>
+            <div id="business-content" class="panel-prose"></div>
+          </section>
+
+          <section id="features" class="panel">
+            <div class="section-row">
+              <h2>Product feature inventory &amp; ranking</h2>
+              <span class="note">Relevance = core-logic dependency. Repeatability = file-touchpoint proxy. Efficiency = build-vs-buy leverage.</span>
+            </div>
+            <div id="feature-list" class="feature-grid"></div>
+          </section>
+
+          <section id="framework" class="panel">
+            <div class="section-row">
+              <h2>Prioritization framework &amp; composite score</h2>
+              <span class="note">Framework auto-selected from feature data richness; see the full report tab for Product Tree / Buy-a-Feature.</span>
+            </div>
+            <div id="framework-content" class="panel-prose"></div>
+          </section>
+
           <section id="inventory" class="panel">
             <div class="section-row">
               <h2>Inventory JSON</h2>
@@ -145,6 +187,14 @@
               <span class="note">Same content used by copy/download.</span>
             </div>
             <pre id="report-markdown" class="code-output"></pre>
+          </section>
+
+          <section id="agent-prompt" class="panel">
+            <div class="section-row">
+              <h2>Agent prompt</h2>
+              <span class="note">Paste into Claude Code, Codex, or a similar agentic IDE as the next job.</span>
+            </div>
+            <pre id="agent-prompt-markdown" class="code-output"></pre>
           </section>
 
           <section id="tasks" class="panel">

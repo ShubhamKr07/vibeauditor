@@ -11,3 +11,4 @@ stack-audit-report.md
 # Do not commit real local env files at the repo root.
 /.env
 /.env.*
+!/.env.example

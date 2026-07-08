@@ -1,11 +1,52 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
-from .pricing import source_list, tier_estimates
+from . import brightdata, business
+from .pricing import source_list, tier_estimates, verify_pricing_source
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def _analyze(
+    inventory: dict[str, Any],
+    target_scale: str | None,
+    budget: float | None,
+    current_host: str | None,
+) -> dict[str, Any]:
+    scores = score_inventory(inventory)
+    tiers = tier_estimates(current_host or _infer_host(inventory))
+
+    business_context = business.infer_business_context(inventory)
+    features = business.score_features(inventory)
+    framework_choice = business.select_prioritization_framework(features, business_context)
+    framework_applied = business.apply_framework(framework_choice["framework"], features, business_context)
+    tree = business.product_tree(features)
+    baf = business.buy_a_feature(features)
+    tech_alternatives = business.evaluate_tech_alternatives(inventory)
+    test_taxonomy = business.classify_test_coverage(inventory)
+
+    tasks = _remediation_task_list(inventory, scores, target_scale)
+    tag_counts = _count_task_tags(tasks)
+    composite = business.composite_score_and_scale(scores, features, tag_counts)
+
+    return {
+        "scores": scores,
+        "tiers": tiers,
+        "business_context": business_context,
+        "features": features,
+        "framework_choice": framework_choice,
+        "framework_applied": framework_applied,
+        "tree": tree,
+        "baf": baf,
+        "tech_alternatives": tech_alternatives,
+        "test_taxonomy": test_taxonomy,
+        "tasks": tasks,
+        "tag_counts": tag_counts,
+        "composite": composite,
+    }
 
 
 def render_report(
@@ -14,26 +55,105 @@ def render_report(
     budget: float | None = None,
     current_host: str | None = None,
 ) -> str:
-    scores = score_inventory(inventory)
-    tiers = tier_estimates(current_host or _infer_host(inventory))
-    summary = _executive_summary(inventory, scores, tiers, target_scale, budget)
-    scorecard = _scorecard_table(scores)
-    scale_table = _scale_table(tiers)
+    a = _analyze(inventory, target_scale, budget, current_host)
+
+    summary = _executive_summary(inventory, a["scores"], a["tiers"], target_scale, budget)
+    scorecard = _scorecard_table(a["scores"])
+    scale_table = _scale_table(a["tiers"])
     infra_notes = _infra_efficiency_notes(inventory)
-    remediation = _remediation_tasks(inventory, scores, target_scale)
+    remediation = "\n".join(a["tasks"])
     sources = _sources_section()
 
     return "\n\n".join(
         [
             "# Stack Auditor Report",
             "## Executive summary\n\n" + summary,
+            "## 1. Business context\n\n" + _business_context_section(a["business_context"]),
+            "## 2. Product feature inventory & ranking\n\n" + _feature_ranking_section(a["features"]),
+            "## 3. Prioritization framework\n\n" + _framework_section(a["framework_choice"], a["framework_applied"]),
+            "## 4. Product Tree & Buy-a-Feature (trajectory / ROI)\n\n" + _product_tree_section(a["tree"], a["baf"]),
+            "## 5-9. Technical deep dive & tooling benchmark\n\n"
+            + _tech_deep_dive_section(inventory, a["features"], a["tech_alternatives"], a["test_taxonomy"]),
             "## Tech stack & code quality scorecard\n\n" + scorecard,
             "## Scalability/cost table\n\n" + scale_table,
             "## Infrastructure efficiency notes\n\n" + infra_notes,
+            "## Security posture benchmark\n\n" + _security_benchmark_section(inventory),
+            "## 10. Composite benchmark score & scale readiness\n\n" + _composite_section(a["composite"], a["tag_counts"]),
             "## Remediation task list\n\n" + remediation,
             "## Sources consulted\n\n" + sources,
         ]
     ) + "\n"
+
+
+def render_agent_prompt(
+    inventory: dict[str, Any],
+    target_scale: str | None = None,
+    budget: float | None = None,
+    current_host: str | None = None,
+) -> str:
+    """Condensed, directive markdown meant to be pasted/ingested into Claude Code, Codex, or a
+    similar agentic coding IDE as the next job. It front-loads every decision already made by
+    the audit (business context, feature ranking, framework, tech swaps) so the agent spends its
+    tool calls executing changes rather than re-deriving analysis, and it explicitly asks the
+    agent to batch reads/edits and install any needed dependencies itself.
+    """
+
+    a = _analyze(inventory, target_scale, budget, current_host)
+    repo = inventory["repo"]
+    ctx = a["business_context"]
+
+    lines = [
+        "# Agent task: implement Stack Auditor recommendations",
+        "",
+        "You are an agentic coding IDE (Claude Code, Codex, or similar) picking up the output of a "
+        "static repository audit. Everything below is already-decided analysis — do not re-derive it. "
+        "Your job is to implement the changes. Work in priority order (fix-now, then fix-before-next-tier, "
+        "then future-proofing). Install any packages you need yourself instead of asking. Batch your reads "
+        "and edits per task (open each affected file once, make all edits for that task, then move to the "
+        "next task) to minimize tool calls before producing your final summary. Preserve existing behavior "
+        "and add or update tests for any changed path. If a task cannot be verified from this repo, say so "
+        "explicitly in your final summary instead of guessing.",
+        "",
+        f"Repo: `{repo.get('source')}` (branch: `{repo.get('branch') or 'default'}`), classified as {repo['app_type']}.",
+        "",
+        "## Business context (inferred, verify with product owner if it matters for a decision)",
+        f"- Problem: {ctx['problem_statement']}",
+        f"- Target customers: {ctx['target_customers']}",
+        f"- Industry / sub-domain: {ctx['industry']} / {ctx['sub_domain']}",
+        f"- Confidence: {ctx['confidence']}",
+        "",
+        f"## Prioritization framework in use: {a['framework_choice']['framework']}",
+        a["framework_choice"]["reasoning"],
+    ]
+
+    if a["framework_applied"]["recommended_changes"]:
+        lines.append("\nRe-prioritization changes to reflect in backlog/issue tracker (not code):")
+        for change in a["framework_applied"]["recommended_changes"]:
+            lines.append(f"- {change}")
+
+    if a["tech_alternatives"]:
+        lines.append("\n## Technical swaps to implement (install packages as needed)")
+        for rule in a["tech_alternatives"]:
+            lines.append(f"- **{rule['area']}**: {rule['signal']} → {rule['alternative']}. {rule['token_note']}")
+
+    lines.append("\n## Task list (do these, in order)")
+    for task in a["tasks"]:
+        lines.append(task)
+
+    composite = a["composite"]
+    lines += [
+        "",
+        "## Success criteria",
+        f"- Composite benchmark score before: {composite['composite_score']}/10 (`{composite['current_ready_tier']}` readiness).",
+        f"- Target after this pass: {composite['projected_score_after_fixes']}/10 (`{composite['projected_ready_tier']}` readiness).",
+        "- Re-run `stack-auditor` (or the web tool) after your changes to confirm the fix-now items no longer appear in the remediation list.",
+        "",
+        "## Constraints",
+        "- Do not fabricate pricing, benchmark, or capacity numbers; if you need one, cite a source or label it estimated.",
+        "- Keep diffs scoped to the tasks above; do not refactor unrelated code.",
+        "- Minimize tool calls: prefer one pass of reads before a batch of edits per task over interleaving many small reads and edits.",
+    ]
+    return "\n".join(lines) + "\n"
 
 
 def score_inventory(inventory: dict[str, Any]) -> list[dict[str, Any]]:
@@ -180,7 +300,7 @@ def _infra_efficiency_notes(inventory: dict[str, Any]) -> str:
     )
 
 
-def _remediation_tasks(inventory: dict[str, Any], scores: list[dict[str, Any]], target_scale: str | None) -> str:
+def _remediation_task_list(inventory: dict[str, Any], scores: list[dict[str, Any]], target_scale: str | None) -> list[str]:
     arch = inventory.get("architecture", {})
     infra = inventory.get("infra", {})
     quality = inventory.get("quality", {})
@@ -231,15 +351,208 @@ def _remediation_tasks(inventory: dict[str, Any], scores: list[dict[str, Any]], 
         tasks.append(
             "- [future-proofing] Run a load test for the target tier and record p50/p95 latency, saturation point, and cost assumptions in the repo. Likely files: `tests/load/`, docs, CI/manual runbook. Benefit: replaces rough estimates with measured capacity."
         )
-    return "\n".join(tasks)
+    return tasks
+
+
+def _count_task_tags(tasks: list[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for task in tasks:
+        match = re.match(r"- \[([^\]]+)\]", task)
+        if match:
+            counts[match.group(1)] = counts.get(match.group(1), 0) + 1
+    return counts
+
+
+def _business_context_section(ctx: dict[str, Any]) -> str:
+    competitors = _join(ctx["potential_competitors"]) or "none surfaced from static evidence"
+    lines = [
+        f"- **Problem statement** ({ctx['confidence']} confidence): {ctx['problem_statement']}",
+        f"- **Target customers** (inferred): {ctx['target_customers']}",
+        f"- **Industry** (inferred): {ctx['industry']}",
+        f"- **Sub-domain** (inferred): {ctx['sub_domain']}",
+        f"- **Potential competitors** (curated static mapping, not a market study): {competitors}",
+        f"- Evidence used: README found={ctx['evidence']['readme_found']}, package description found={ctx['evidence']['package_description_found']}, "
+        f"keyword count={ctx['evidence']['keyword_count']}, industry keyword hits={ctx['evidence']['industry_keyword_hits']}.",
+        "- This section is inferred from README/package-description/keyword text and dependency signals only. Treat it as a starting hypothesis to verify with the product owner, not a market-research finding.",
+    ]
+    live = ctx.get("live_search_evidence")
+    if live and live.get("results"):
+        lines.append(f"\n**Live SERP evidence (Bright Data)** for \"{live['query']}\" — real search results, source-labeled by Bright Data's parser; verify relevance yourself before treating any of these as a confirmed competitor:")
+        for item in live["results"][:5]:
+            label = item.get("source") or item["title"]
+            lines.append(f"  - **{label}** — [{item['title']}]({item['link']}): {item['description']}")
+    elif brightdata.is_configured():
+        lines.append("\n- Live SERP evidence: Bright Data was configured but returned no results for this query.")
+    else:
+        lines.append("\n- Live SERP evidence: not fetched (set `BRIGHTDATA_API_KEY` and `BRIGHTDATA_SERP_ZONE` to enable).")
+    return "\n".join(lines)
+
+
+def _feature_ranking_section(features: list[dict[str, Any]]) -> str:
+    if not features:
+        return "No segmentable product features were found from route/page/component file layout. This usually means the repo is a library, a very small app, or uses an unconventional file structure this scanner doesn't recognize."
+    rows = [
+        "| Feature | Category | Relevance (core-logic dependency) | Repeatability (file-touchpoint proxy) | Efficiency (build-vs-buy leverage) | Composite | Risk if missing |",
+        "|---|---|---:|---:|---:|---:|---|",
+    ]
+    for f in features:
+        rows.append(
+            f"| `{f['name']}` | {f['category']} | {f['relevance']}/10 | {f['repeatability']}/10 | {f['efficiency']}/10 | {f['composite']} | {f['risk_if_missing']} |"
+        )
+    note = (
+        "\nRelevance answers \"is core logic non-implementable without it, and how much effort/risk would replacing it cost\". "
+        "Repeatability is a static proxy (file-touchpoint count across the codebase), not real navigation telemetry — verify against product analytics. "
+        "Efficiency reflects build-vs-buy leverage from `reference/feature_market_playbook.md`."
+    )
+    return "\n".join(rows) + "\n" + note
+
+
+def _framework_section(choice: dict[str, Any], applied: dict[str, Any]) -> str:
+    lines = [
+        f"**Framework selected: {choice['framework']}.** {choice['reasoning']}",
+    ]
+    if choice.get("runners_up"):
+        lines.append(f"Runner-up frameworks considered: {_join(choice['runners_up'])}.")
+    if applied["rows"]:
+        lines.append("")
+        lines.append("| Feature | " + applied["rows"][0]["framework_label"] + " |")
+        lines.append("|---|---:|")
+        for row in applied["rows"]:
+            lines.append(f"| `{row['name']}` | {row['framework_score']} |")
+    if applied["recommended_changes"]:
+        lines.append("\n**Recommended re-prioritization changes:**")
+        for change in applied["recommended_changes"]:
+            lines.append(f"- {change}")
+    else:
+        lines.append("\nNo re-prioritization changes are recommended — current file-count-implied investment roughly tracks the framework's ranking.")
+    return "\n".join(lines)
+
+
+def _product_tree_section(tree: list[dict[str, Any]], baf: dict[str, Any]) -> str:
+    if not tree:
+        return "No features were available to place on a Product Tree or run through Buy-a-Feature."
+    lines = ["### Product Tree placement", "", "| Feature | Placement | Category |", "|---|---|---|"]
+    for item in tree:
+        lines.append(f"| `{item['name']}` | {item['placement']} | {item['category']} |")
+
+    lines += ["", "### Buy-a-Feature (simulated persona demand, ROI signal)", ""]
+    lines.append("Four personas (End user, Growth/marketing, Security/compliance, Engineering/platform) each allocate a 100-unit hypothetical budget across features by simulated interest. This is a static-evidence simulation, not real user research.")
+    lines.append("")
+    lines.append("| Feature | Total demand units | End user | Growth/marketing | Security/compliance | Engineering/platform |")
+    lines.append("|---|---:|---:|---:|---:|---:|")
+    for row in baf["ranking"]:
+        pb = row["persona_budgets"]
+        lines.append(
+            f"| `{row['name']}` | {row['total_demand_units']} | {pb['End user']} | {pb['Growth / marketing']} | {pb['Security / compliance']} | {pb['Engineering / platform']} |"
+        )
+    if baf["possible_overinvestment"]:
+        lines.append("\n**Honest call-outs (possible over-investment relative to simulated demand):**")
+        for note in baf["possible_overinvestment"]:
+            lines.append(f"- {note}")
+    return "\n".join(lines)
+
+
+def _tech_deep_dive_section(
+    inventory: dict[str, Any],
+    features: list[dict[str, Any]],
+    tech_alternatives: list[dict[str, Any]],
+    test_taxonomy: dict[str, Any],
+) -> str:
+    lines = ["### Per-feature technical mapping"]
+    if features:
+        lines.append("")
+        lines.append("| Feature | Layers touched | Files | Tests found | Evidence paths |")
+        lines.append("|---|---|---:|---|---|")
+        for f in features:
+            lines.append(
+                f"| `{f['name']}` | {_join(f['layers']) or 'unknown'} | {f['file_count']} | {'yes' if f['has_tests'] else 'no'} | {_join(f['evidence_paths'])} |"
+            )
+    else:
+        lines.append("No features segmented; see stack scorecard below for whole-repo signal instead.")
+
+    lines.append("\n### Architecture, frontend, and backend/database tooling benchmark")
+    if tech_alternatives:
+        lines.append("")
+        lines.append("| Area | Signal | Fits at | Breaks at | Recommended alternative | Why it reduces agent token/context load |")
+        lines.append("|---|---|---|---|---|---|")
+        for rule in tech_alternatives:
+            lines.append(
+                f"| {rule['area']} | {rule['signal']} | {rule['fits_at']} | {rule['breaks_at']} | {rule['alternative']} | {rule['token_note']} |"
+            )
+    else:
+        lines.append("\nNo tooling-alternative triggers fired against `reference/tech_alternatives.md` — no evidence-backed swap to recommend from this static scan.")
+
+    lines.append("\n### Test coverage benchmark")
+    if test_taxonomy["total_test_files"]:
+        lines.append(f"\n{test_taxonomy['total_test_files']} test file(s) found. Classified by conventional test type (filename/path heuristic):\n")
+        lines.append("| Test type | Example files |")
+        lines.append("|---|---|")
+        for label, sample in test_taxonomy["by_type"].items():
+            lines.append(f"| {label} | {_join(sample)} |")
+        if test_taxonomy["missing_types"]:
+            lines.append(f"\n**Missing test types (no file-naming evidence found):** {_join(test_taxonomy['missing_types'])}.")
+    else:
+        lines.append("\nNo test files were found at all. Unit, integration, sanity, and regression coverage are all unverified.")
+    lines.append(f"\n{test_taxonomy['exploratory_note']}")
+
+    return "\n".join(lines)
+
+
+def _security_benchmark_section(inventory: dict[str, Any]) -> str:
+    security = inventory.get("quality", {}).get("security", {})
+    arch = inventory.get("architecture", {})
+    lines = [
+        f"- **Auth**: {_join(security.get('auth_signal')) or 'no auth library/dependency detected'}.",
+        f"- **Env samples**: {'present' if security.get('env_samples_present') else 'not found'}; "
+        f"**committed runtime env files** (risk if secrets are inside): {_join(security.get('committed_runtime_env_files')) or 'none detected'}.",
+        f"- **External/third-party APIs used**: {_join(arch.get('third_party_services')) or 'none detected'}.",
+        f"- **CORS dependency**: {_join(security.get('cors_signal')) or 'none detected'}. "
+        f"**Rate-limit dependency**: {_join(security.get('rate_limit_signal')) or 'none detected'}.",
+        f"- **System ports exposed** (Dockerfile `EXPOSE` / compose port mappings): "
+        + (_join([f"{p['port']}" + (f" ({p['service']})" if p.get("service") else "") + f" in {p['path']}" for p in security.get("exposed_ports", [])]) or "none detected"),
+        f"- **Secret-management evidence**: secret-like filenames: {_join(security.get('secret_like_filenames')) or 'none'}; "
+        f"grep-based high-signal secret pattern hits (AWS/Stripe/Google/private-key/Slack/GitHub token formats only, not a full scanner): "
+        + (_join([f"{h['pattern']} in {h['path']}" for h in security.get("secret_scan_hits", [])]) or "none detected"),
+        "- This is a static, non-exploitative check (regex pattern match + dependency/file presence only). It is not a substitute for a dedicated secret scanner (gitleaks/trufflehog), SAST tool, or a real penetration test.",
+    ]
+    return "\n".join(lines)
+
+
+def _composite_section(composite: dict[str, Any], tag_counts: dict[str, int]) -> str:
+    tier_users = {
+        "0-to-1": "pre-launch / first users",
+        "1-to-100": "early adopters",
+        "100-to-10k": "product-market-fit stage",
+        "10k-to-1m": "growth stage",
+        "1m-to-100m": "hyperscale",
+    }
+    lines = [
+        f"- **Composite benchmark score**: {composite['composite_score']}/10 "
+        f"(scorecard dimensions + feature-depth score {composite['feature_depth_score']}/10 — {composite['feature_depth_note']}).",
+        f"- **Current user-scale readiness**: `{composite['current_ready_tier']}` ({tier_users[composite['current_ready_tier']]}).",
+        f"- **Projected score after fix-now/fix-before-next-tier remediation**: {composite['projected_score_after_fixes']}/10 "
+        f"→ projected readiness `{composite['projected_ready_tier']}` ({tier_users[composite['projected_ready_tier']]}), "
+        f"based on {tag_counts.get('fix-now', 0)} fix-now and {tag_counts.get('fix-before-next-tier', 0)} fix-before-next-tier task(s) in the remediation list below.",
+        f"- **Estimated agent token/context reduction from recommended swaps**: ~{composite['estimated_token_reduction_pct']}%. {composite['token_reduction_note']}",
+    ]
+    return "\n".join(lines)
 
 
 def _sources_section() -> str:
     rows = []
     for source in source_list():
-        rows.append(f"- {source['name']}: {source['url']} (accessed {source['accessed']})")
+        line = f"- {source['name']}: {source['url']} (accessed {source['accessed']})"
+        verification = verify_pricing_source(source["name"], source["url"])
+        if verification:
+            if verification["matches"]:
+                line += " — live-verified current (Bright Data)"
+            else:
+                line += f" — Bright Data top result now points at `{verification['top_result_domain']}`; re-check this URL"
+        rows.append(line)
     rows.append("- Local reference: `reference/scoring_rubric.md`")
     rows.append("- Local reference: `reference/scale_tiers.md`")
+    if not brightdata.is_configured():
+        rows.append("- Live source verification: not run (set `BRIGHTDATA_API_KEY` and `BRIGHTDATA_SERP_ZONE` to enable freshness checks on the pricing URLs above).")
     return "\n".join(rows)
 
 
