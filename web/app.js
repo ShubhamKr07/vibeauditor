@@ -1,5 +1,7 @@
 const form = document.querySelector("#audit-form");
 const statusEl = document.querySelector("#status");
+const statusTextEl = document.querySelector(".status-text");
+const themeToggle = document.querySelector("#theme-toggle");
 const scanButton = document.querySelector("#scan-button");
 const overviewContent = document.querySelector("#overview-content");
 const emptyState = document.querySelector("#empty-state");
@@ -165,6 +167,21 @@ const SOURCES = [
   ["Next.js production deployment docs", "https://nextjs.org/docs/app/building-your-application/deploying"],
   ["PostgreSQL indexes documentation", "https://www.postgresql.org/docs/current/indexes.html"]
 ];
+
+initTheme();
+themeToggle.addEventListener("click", toggleTheme);
+
+function initTheme() {
+  const stored = localStorage.getItem("stack-auditor-theme");
+  const preferred = stored || (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+  document.documentElement.dataset.theme = preferred;
+}
+
+function toggleTheme() {
+  const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem("stack-auditor-theme", next);
+}
 
 document.querySelectorAll(".tab").forEach((tab) => {
   tab.addEventListener("click", () => {
@@ -458,11 +475,16 @@ function renderScores(scores) {
     const article = document.createElement("article");
     article.className = "score-card";
     const tone = item.score >= 7 ? "good" : item.score >= 5 ? "warn" : "bad";
+    const toneLabel = tone === "good" ? "Solid" : tone === "warn" ? "Watch" : "At risk";
     article.innerHTML = `
       <div class="score-top">
         <h3>${escapeHtml(item.category)}</h3>
-        <span class="score ${tone}">${item.score}/10</span>
+        <div class="gauge ${tone}" style="--pct:${item.score * 10}">
+          <span class="gauge-value">${item.score}</span>
+          <span class="gauge-max">/10</span>
+        </div>
       </div>
+      <span class="tone-label ${tone}">${toneLabel}</span>
       <p>${escapeHtml(item.justification)}</p>
       <span class="standard">${escapeHtml(item.standard)}</span>
     `;
@@ -812,13 +834,16 @@ function evidence(prefix, items, fallback) {
 
 function setBusy(isBusy, message) {
   scanButton.disabled = isBusy;
-  scanButton.textContent = isBusy ? "Analyzing..." : "Analyze repository";
+  scanButton.classList.toggle("busy", isBusy);
+  scanButton.innerHTML = isBusy
+    ? `<span class="spinner" aria-hidden="true"></span> Analyzing...`
+    : `<span class="button-icon" aria-hidden="true">&gt;</span> Analyze repository`;
   if (message) setStatus(message);
 }
 
 function setStatus(message, tone = "") {
-  statusEl.textContent = message;
-  statusEl.style.borderColor = tone === "bad" ? "var(--danger)" : tone === "warn" ? "var(--warn)" : tone === "good" ? "var(--good)" : "var(--line)";
+  statusTextEl.textContent = message;
+  statusEl.dataset.tone = tone || "idle";
 }
 
 function enableActions(enabled) {

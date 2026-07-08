@@ -3,19 +3,31 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
     <title>Stack Auditor Web</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
+    <header class="topbar">
+      <div class="topbar-brand">
+        <span class="mark" aria-hidden="true">&gt;_</span>
+        <div class="topbar-text">
+          <strong>Stack Auditor</strong>
+          <span>Repo scan for stack, scale &amp; cost posture</span>
+        </div>
+      </div>
+      <button id="theme-toggle" class="icon-button" type="button" aria-label="Toggle color theme">
+        <span class="theme-icon theme-icon-dark" aria-hidden="true">&#9789;</span>
+        <span class="theme-icon theme-icon-light" aria-hidden="true">&#9728;</span>
+      </button>
+    </header>
+
     <main class="shell">
       <section class="workspace" aria-label="Stack Auditor workspace">
         <aside class="controls" aria-label="Audit controls">
-          <div class="brand">
-            <div class="mark" aria-hidden="true">SA</div>
-            <div>
-              <h1>Stack Auditor</h1>
-              <p>Interactive repo scan for stack, scale, and cost posture.</p>
-            </div>
+          <div class="controls-heading">
+            <span class="eyebrow">Configure</span>
+            <h1>New audit</h1>
           </div>
 
           <form id="audit-form" class="form">
@@ -40,11 +52,11 @@
                 Target scale
                 <select id="target-scale" name="targetScale">
                   <option value="">Auto</option>
-                  <option value="0-to-1">0 -> 1</option>
-                  <option value="1-to-100">1 -> 100</option>
-                  <option value="100-to-10k">100 -> 10K</option>
-                  <option value="10k-to-1m">10K -> 1M</option>
-                  <option value="1m-to-100m">1M -> 100M</option>
+                  <option value="0-to-1">0 -&gt; 1</option>
+                  <option value="1-to-100">1 -&gt; 100</option>
+                  <option value="100-to-10k">100 -&gt; 10K</option>
+                  <option value="10k-to-1m">10K -&gt; 1M</option>
+                  <option value="1m-to-100m">1M -&gt; 100M</option>
                 </select>
               </label>
               <label>
@@ -59,13 +71,14 @@
             </label>
 
             <button id="scan-button" class="primary" type="submit">
-              <span class="button-icon" aria-hidden="true">></span>
+              <span class="button-icon" aria-hidden="true">&gt;</span>
               Analyze repository
             </button>
           </form>
 
           <div class="status" id="status" role="status">
-            Ready. Public repos work without a token until GitHub rate limits apply.
+            <span class="status-dot" aria-hidden="true"></span>
+            <span class="status-text">Ready. Public repos work without a token until GitHub rate limits apply.</span>
           </div>
 
           <div class="actions">
@@ -86,6 +99,7 @@
 
           <section id="overview" class="panel active" aria-labelledby="overview-tab">
             <div class="empty-state" id="empty-state">
+              <span class="prompt-caret" aria-hidden="true">&gt;<span class="caret-blink">_</span></span>
               <h2>Paste a GitHub repo URL to start.</h2>
               <p>The tool scans manifests, dependency names, route files, infra config, env samples, tests, and lockfiles. Scores are conservative when evidence is missing.</p>
             </div>
